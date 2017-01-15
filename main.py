@@ -1,7 +1,27 @@
 from Tkinter import *
 import Tkinter as ttk
 
+import threading
 import zmq
+
+class IncomingMessageThread(threading.Thread):
+    callback = None
+
+    def run(self):
+        context = zmq.Context()
+
+        try:
+            subscription = context.socket(zmq.SUB)
+            subscription.connect("tcp://localhost:5002")
+
+            # TODO: Use json for messages!
+            subscription.setsockopt(zmq.SUBSCRIBE, "MESSAGE ")
+        except zmq.error.ZMQError as e:
+            print("Failed to subscribe")
+
+        while True:
+            message = subscription.recv()
+            self.callback(message)
 
 class ChatClient(ttk.Frame):
     def __init__(self, width, height):
@@ -33,6 +53,8 @@ class ChatClient(ttk.Frame):
             }
         }
 
+        self.incoming_message_thread = None
+
     def start(self):
         self.setupNetworking()
 
@@ -57,6 +79,15 @@ class ChatClient(ttk.Frame):
             send_socket.connect("tcp://localhost:5000")
 
             self.networking["sockets"]["sender"] = send_socket
+
+            self.incoming_message_thread = IncomingMessageThread()
+
+            self.incoming_message_thread.callback = self.handle_incoming_message
+
+            # Python will terminate the app, in the face of running threads, if those
+            # threads are daemon threads.
+            self.incoming_message_thread.daemon = True
+            self.incoming_message_thread.start()
 
         except zmq.error.ZMQError as e:
             self.networking["status"]["error"] = True
@@ -91,6 +122,9 @@ class ChatClient(ttk.Frame):
         start_y = (self.window_dimensions["height"] / 2) - (app_height / 2)
 
         self.root.geometry("%dx%d+%d+%d" % (app_width, app_height, start_x, start_y))
+
+    def handle_incoming_message(self, message):
+        self.message_history.insert(END, message)
 
 def main():
     app = ChatClient(800, 650)
