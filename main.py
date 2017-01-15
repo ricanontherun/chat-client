@@ -1,8 +1,8 @@
 from Tkinter import *
 import Tkinter as ttk
-
 import threading
 import zmq
+import json
 
 class IncomingMessageThread(threading.Thread):
     callback = None
@@ -23,6 +23,7 @@ class IncomingMessageThread(threading.Thread):
             message = subscription.recv()
             self.callback(message)
 
+
 class ChatClient(ttk.Frame):
     def __init__(self, width, height):
         self.root = Tk()
@@ -37,11 +38,17 @@ class ChatClient(ttk.Frame):
             "width": width
         }
 
-        # Holds the text in the entry element.
-        self.message_buffer = StringVar()
+        self.buffers = {
+            "message": StringVar(),
+            "username": StringVar(),
+            "connection": StringVar()
+        }
 
         # Holds a scrollable list of the conversation history.
         self.message_history = None
+
+        self.frames = {}
+        self.labels = {}
 
         # Networking data structures
         self.networking = {
@@ -50,50 +57,89 @@ class ChatClient(ttk.Frame):
             "status": {
                 "error": False,
                 "error_message": ""
-            }
+            },
+            "client_token": None
         }
 
         self.incoming_message_thread = None
 
     def start(self):
-        self.setupNetworking()
+        self.setup_networking()
 
-        self.buildUI()
+        self.build_ui()
 
         self.root.mainloop()
 
-    def setupNetworking(self):
+    def setup_networking(self):
         """
-        Setup the networking structures and connect to the chat server.
+        Setup the networking data structures
 
         :return: void
         """
         self.networking["context"] = zmq.Context()
 
         try:
-            # Create some sockets.
-
             # The sending socket sends messages to the chat server
             # which are then routes to all other chat clients.
             send_socket = self.networking["context"].socket(zmq.PUSH)
             send_socket.connect("tcp://localhost:5000")
-
             self.networking["sockets"]["sender"] = send_socket
 
+            # The connection socket handles establishing a connection
+            # between this particular client and the server.
+            connection_socket = self.networking["context"].socket(zmq.REQ)
+            connection_socket.connect("tcp://localhost:5001")
+            self.networking["sockets"]["connector"] = connection_socket
+
             self.incoming_message_thread = IncomingMessageThread()
-
             self.incoming_message_thread.callback = self.handle_incoming_message
-
-            # Python will terminate the app, in the face of running threads, if those
-            # threads are daemon threads.
             self.incoming_message_thread.daemon = True
             self.incoming_message_thread.start()
 
         except zmq.error.ZMQError as e:
             self.networking["status"]["error"] = True
-            self.networking["status"]["messgae"] = e.message
+            self.networking["status"]["message"] = e.message
 
-    def buildUI(self):
+    def build_ui(self):
+        self.build_connection_frame()
+        self.center()
+
+    def build_connection_frame(self):
+        frame = ttk.Frame(self.root)
+        frame.pack(fill=BOTH, expand=1)
+
+        self.labels["connection"] = ttk.Label(frame, textvariable=self.buffers["connection"])
+        self.labels["connection"].pack()
+
+        # Entry for username
+        entry = ttk.Entry(frame, textvariable=self.buffers["username"])
+        entry.pack()
+
+        button = ttk.Button(frame, text="Connect", command=self.connect)
+        button.pack()
+
+        self.frames["connection"] = frame
+
+    def connect(self):
+        username = self.buffers["username"].get()
+
+        if len(username) == 0:
+            self.buffers["connection"].set("Please enter a username.")
+        else:
+            connection_message = "CLIENT_CONNECT " + username
+            self.networking["sockets"]["connector"].send(connection_message)
+
+            # TODO: Add some sort of timeout here...
+            reply = self.networking["sockets"]["connector"].recv()
+
+            # Seriously, use json for protocol structure
+            parts = reply.split()
+            self.networking["client_token"] = parts[1]
+
+            self.frames["connection"].pack_forget()
+            self.build_chat_frame()
+
+    def build_chat_frame(self):
         mainframe = ttk.Frame(self.root)
         mainframe.pack(fill=BOTH, expand=1)
 
@@ -103,15 +149,20 @@ class ChatClient(ttk.Frame):
         bottom_frame = ttk.Frame(mainframe)
         bottom_frame.pack(fill=BOTH, expand=1)
 
-        entry = ttk.Entry(bottom_frame, textvariable=self.message_buffer)
+        entry = ttk.Entry(bottom_frame, textvariable=self.buffers["message"])
         entry.pack(fill=BOTH, expand=1)
 
-        self.root.bind('<Return>', self.sendMessage)
+        self.root.bind('<Return>', self.post_message)
 
-        self.center()
+        self.frames["chat"] = mainframe
 
-    def sendMessage(self, *args):
-        self.networking["sockets"]["sender"].send(self.message_buffer.get())
+    def post_message(self):
+        message = {
+            "token": self.networking["client_token"],
+            "message": self.buffers["message"].get()
+        }
+
+        self.networking["sockets"]["sender"].send(json.dumps(message))
 
     def center(self):
         app_width = self.app_dimensions["width"]
@@ -126,9 +177,11 @@ class ChatClient(ttk.Frame):
     def handle_incoming_message(self, message):
         self.message_history.insert(END, message)
 
+
 def main():
     app = ChatClient(800, 650)
     app.start()
+
 
 if __name__ == "__main__":
     main()
