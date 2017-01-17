@@ -126,20 +126,21 @@ class ChatClient(ttk.Frame):
         if len(username) == 0:
             self.buffers["connection"].set("Please enter a username.")
         else:
-            connection_message = "CLIENT_CONNECT " + username
-            self.networking["sockets"]["connector"].send(connection_message)
+            connection_message = {"username": username}
 
-            # TODO: Add some sort of timeout here...
-            reply = self.networking["sockets"]["connector"].recv()
+            self.networking["sockets"]["connector"].send(json.dumps(connection_message))
 
-            # Seriously, use json for protocol structure
-            parts = reply.split()
-            self.networking["client_token"] = parts[1]
+            reply = json.loads(self.networking["sockets"]["connector"].recv())
 
-            self.frames["connection"].pack_forget()
-            self.build_chat_frame()
+            if reply["success"] == True:
+                self.networking["client_token"] = reply["token"]
+                self.build_chat_frame()
+            else:
+                self.buffers["connection"].set(reply["error"])
 
     def build_chat_frame(self):
+        self.frames["connection"].pack_forget();
+
         mainframe = ttk.Frame(self.root)
         mainframe.pack(fill=BOTH, expand=1)
 
@@ -156,7 +157,7 @@ class ChatClient(ttk.Frame):
 
         self.frames["chat"] = mainframe
 
-    def post_message(self):
+    def post_message(self, something):
         message = {
             "token": self.networking["client_token"],
             "message": self.buffers["message"].get()
@@ -175,6 +176,8 @@ class ChatClient(ttk.Frame):
         self.root.geometry("%dx%d+%d+%d" % (app_width, app_height, start_x, start_y))
 
     def handle_incoming_message(self, message):
+        print(message)
+        return
         self.message_history.insert(END, message)
 
 
