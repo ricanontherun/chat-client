@@ -118,9 +118,13 @@ class ChatClient(ttk.Frame):
         button = ttk.Button(frame, text="Connect", command=self.connect)
         button.pack()
 
+        self.root.bind('<Return>', self.connect)
+
+        entry.focus()
+
         self.frames["connection"] = frame
 
-    def connect(self):
+    def connect(self, args):
         username = self.buffers["username"].get()
 
         if len(username) == 0:
@@ -139,7 +143,7 @@ class ChatClient(ttk.Frame):
                 self.buffers["connection"].set(reply["error"])
 
     def build_chat_frame(self):
-        self.frames["connection"].pack_forget();
+        self.frames["connection"].pack_forget()
 
         mainframe = ttk.Frame(self.root)
         mainframe.pack(fill=BOTH, expand=1)
@@ -154,6 +158,8 @@ class ChatClient(ttk.Frame):
         entry.pack(fill=BOTH, expand=1)
 
         self.root.bind('<Return>', self.post_message)
+
+        entry.focus()
 
         self.frames["chat"] = mainframe
 
@@ -176,9 +182,13 @@ class ChatClient(ttk.Frame):
         self.root.geometry("%dx%d+%d+%d" % (app_width, app_height, start_x, start_y))
 
     def handle_incoming_message(self, message):
-        print(message)
-        return
-        self.message_history.insert(END, message)
+        json_string = message[message.find(" "):]
+
+        message_json = json.loads(json_string)
+
+        if message_json["success"]:
+            message_string = "%s: %s" % (message_json['username'], message_json['message'])
+            self.message_history.insert(END, message_string)
 
 
 def main():
